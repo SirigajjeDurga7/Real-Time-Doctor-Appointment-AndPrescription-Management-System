@@ -3,14 +3,18 @@ import psycopg2
 import pandas as pd
 
 # ---------- Database Connection ----------
+import streamlit as st
+import psycopg2
+
 def get_connection():
     return psycopg2.connect(
-        host="db.huncvfrpgrokibtemogd.supabase.co",
-        database="postgres",
-        user="postgres",
-        password="SirigajjeDurga@7",
-        port="5432"
+        host=st.secrets["postgres"]["host"],
+        database=st.secrets["postgres"]["database"],
+        user=st.secrets["postgres"]["user"],
+        password=st.secrets["postgres"]["password"],
+        port=st.secrets["postgres"]["port"]
     )
+
 
 # ---------- Insert Data ----------
 def insert_data(table_name, data):
