@@ -13,6 +13,7 @@ def get_connection():
         user=st.secrets["postgres"]["user"],
         password=st.secrets["postgres"]["password"],
         port=st.secrets["postgres"]["port"]
+        sslmode="require"
     )
 
 
