@@ -2,38 +2,47 @@ import streamlit as st
 import psycopg2
 import pandas as pd
 
-
+# ---------- Database Connection ----------
 def get_connection():
-    return psycopg2.connect(
-        host=st.secrets["postgres"]["host"],
-        database=st.secrets["postgres"]["database"],
-        user=st.secrets["postgres"]["user"],
-        password=st.secrets["postgres"]["password"],
-        port=st.secrets["postgres"]["port"],
-        sslmode="require"
-    )
-
-
+    try:
+        return psycopg2.connect(
+            host=st.secrets["postgres"]["host"],
+            dbname=st.secrets["postgres"]["database"],  # Fixed: Use 'dbname='
+            user=st.secrets["postgres"]["user"],
+            password=st.secrets["postgres"]["password"],
+            port=int(st.secrets["postgres"]["port"]),  # Cast to int
+            sslmode="require"
+        )
+    except psycopg2.OperationalError as e:
+        st.error(f"❌ Database connection failed: {str(e)}")
+        st.stop()  # Halt execution and show error in UI
+        return None  # Fallback, though st.stop() prevents further code
 
 # ---------- Insert Data ----------
 def insert_data(table_name, data):
     conn = get_connection()
+    if conn is None:
+        return  # Early exit if connection failed
     cursor = conn.cursor()
 
     queries = {
-        "Patients1": "INSERT INTO Patients1 (full_name, email, phone, age, gender, address) VALUES (%s,%s,%s,%s,%s,%s)",
-        "Doctors1": "INSERT INTO Doctors1 (full_name, specialization, email, phone, experience_years) VALUES (%s,%s,%s,%s,%s)",
-        "AvailabilityOfDoctors1": "INSERT INTO AvailabilityOfDoctors1 (doctor_id, available_date, start_time, end_time, is_available) VALUES (%s,%s,%s,%s,%s)",
-        "Appointments1": "INSERT INTO Appointments1 (patient_id, doctor_id, appointment_date, appointment_time, status) VALUES (%s,%s,%s,%s,%s)",
-        "Payments1": "INSERT INTO Payments1 (appointment_id, patient_id, amount, transaction_id, payment_status) VALUES (%s,%s,%s,%s,%s)",
-        "Medical_Records1": "INSERT INTO Medical_Records1 (patient_id, doctor_id, appointment_id, diagnosis, prescription) VALUES (%s,%s,%s,%s,%s)"
+        "Patients1": "INSERT INTO Patients1 (full_name, email, phone, age, gender, address) VALUES (%s, %s, %s, %s, %s, %s)",  # Added spaces for readability
+        "Doctors1": "INSERT INTO Doctors1 (full_name, specialization, email, phone, experience_years) VALUES (%s, %s, %s, %s, %s)",
+        "AvailabilityOfDoctors1": "INSERT INTO AvailabilityOfDoctors1 (doctor_id, available_date, start_time, end_time, is_available) VALUES (%s, %s, %s, %s, %s)",
+        "Appointments1": "INSERT INTO Appointments1 (patient_id, doctor_id, appointment_date, appointment_time, status) VALUES (%s, %s, %s, %s, %s)",
+        "Payments1": "INSERT INTO Payments1 (appointment_id, patient_id, amount, transaction_id, payment_status) VALUES (%s, %s, %s, %s, %s)",
+        "Medical_Records1": "INSERT INTO Medical_Records1 (patient_id, doctor_id, appointment_id, diagnosis, prescription) VALUES (%s, %s, %s, %s, %s)"
     }
 
-    cursor.execute(queries[table_name], data)
-    conn.commit()
-    cursor.close()
-    conn.close()
-
+    try:
+        cursor.execute(queries[table_name], data)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        st.error(f"❌ Insert failed: {str(e)}")
+    finally:
+        cursor.close()
+        conn.close()
 
 # ---------- Home Page ----------
 def home_page():
@@ -45,7 +54,6 @@ def home_page():
         st.session_state.page = "auth"
         st.rerun()
 
-
 # ---------- Authentication Page ----------
 def auth_page():
     st.title("🔑 Login / Signup")
@@ -54,15 +62,20 @@ def auth_page():
     password = st.text_input("Password", type="password")
 
     conn = get_connection()
+    if conn is None:
+        return  # Exit if connection failed
     cur = conn.cursor()
 
     if choice == "Signup":
         username = st.text_input("Username")
         if st.button("Sign Up"):
             if email and password and username:
-                cur.execute("INSERT INTO Users1 (username, email, password) VALUES (%s, %s, %s)", (username, email, password))
-                conn.commit()
-                st.success("✅ Signup successful! Please login.")
+                try:
+                    cur.execute("INSERT INTO Users1 (username, email, password) VALUES (%s, %s, %s)", (username, email, password))
+                    conn.commit()
+                    st.success("✅ Signup successful! Please login.")
+                except Exception as e:
+                    st.error(f"❌ Signup failed: {str(e)}")
             else:
                 st.warning("⚠️ Please fill in all fields.")
     elif choice == "Login":
@@ -77,7 +90,6 @@ def auth_page():
 
     cur.close()
     conn.close()
-
 
 # ---------- Dashboard Page ----------
 def dashboard_page():
@@ -111,13 +123,19 @@ def dashboard_page():
         st.session_state.page = "home"
         st.rerun()
 
-
 # ---------- Display Table and Insert Form ----------
 def show_table(table_name):
     conn = get_connection()
-    df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-    st.subheader(f"📊 Viewing {table_name.replace('1','')} Data")
-    st.dataframe(df, use_container_width=True)
+    if conn is None:
+        return  # Exit if connection failed
+    try:
+        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
+        st.subheader(f"📊 Viewing {table_name.replace('1','')} Data")
+        st.dataframe(df, use_container_width=True)
+    except Exception as e:
+        st.error(f"❌ Failed to load table: {str(e)}")
+    finally:
+        conn.close()
 
     st.markdown("### ➕ Insert New Record")
 
@@ -132,6 +150,7 @@ def show_table(table_name):
             if all([full_name, email, phone, age, gender, address]):
                 insert_data("Patients1", (full_name, email, phone, age, gender, address))
                 st.success("✅ Patient added successfully!")
+                st.rerun()  # Refresh to show updated table
             else:
                 st.warning("⚠️ Please fill all fields before inserting!")
 
@@ -145,6 +164,7 @@ def show_table(table_name):
             if all([full_name, specialization, email, phone, experience]):
                 insert_data("Doctors1", (full_name, specialization, email, phone, experience))
                 st.success("✅ Doctor added successfully!")
+                st.rerun()
             else:
                 st.warning("⚠️ Please fill all fields before inserting!")
 
@@ -158,6 +178,7 @@ def show_table(table_name):
             if doctor_id and available_date and start_time and end_time:
                 insert_data("AvailabilityOfDoctors1", (doctor_id, available_date, start_time, end_time, is_available))
                 st.success("✅ Availability added successfully!")
+                st.rerun()
             else:
                 st.warning("⚠️ Please fill all fields before inserting!")
 
@@ -171,6 +192,7 @@ def show_table(table_name):
             if patient_id and doctor_id and appointment_date and appointment_time and status:
                 insert_data("Appointments1", (patient_id, doctor_id, appointment_date, appointment_time, status))
                 st.success("✅ Appointment added successfully!")
+                st.rerun()
             else:
                 st.warning("⚠️ Please fill all fields before inserting!")
 
@@ -184,6 +206,7 @@ def show_table(table_name):
             if all([appointment_id, patient_id, amount, transaction_id, payment_status]):
                 insert_data("Payments1", (appointment_id, patient_id, amount, transaction_id, payment_status))
                 st.success("✅ Payment added successfully!")
+                st.rerun()
             else:
                 st.warning("⚠️ Please fill all fields before inserting!")
 
@@ -197,11 +220,9 @@ def show_table(table_name):
             if all([patient_id, doctor_id, appointment_id, diagnosis, prescription]):
                 insert_data("Medical_Records1", (patient_id, doctor_id, appointment_id, diagnosis, prescription))
                 st.success("✅ Record added successfully!")
+                st.rerun()
             else:
                 st.warning("⚠️ Please fill all fields before inserting!")
-
-    conn.close()
-
 
 # ---------- Main Controller ----------
 def main():
@@ -214,7 +235,6 @@ def main():
         auth_page()
     elif st.session_state.page == "dashboard":
         dashboard_page()
-
 
 if __name__ == "__main__":
     main()
