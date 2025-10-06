@@ -1,7 +1,8 @@
-streamlit==1.26.0
-psycopg2-binary==2.9.9
-pandas==2.1.1
-python-dotenv==1.0.0
-supabase==1.0.0
+streamlit
+psycopg2-binary
+pandas
+python-dotenv
+supabase
+
 
 
