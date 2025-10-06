@@ -2,9 +2,6 @@ import streamlit as st
 import psycopg2
 import pandas as pd
 
-# ---------- Database Connection ----------
-import streamlit as st
-import psycopg2
 
 def get_connection():
     return psycopg2.connect(
@@ -15,6 +12,7 @@ def get_connection():
         port=st.secrets["postgres"]["port"],
         sslmode="require"
     )
+
 
 
 # ---------- Insert Data ----------
