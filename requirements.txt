@@ -1,8 +1,4 @@
 streamlit
-psycopg2-binary
-pandas
-python-dotenv
 supabase
-
-
-
+pandas
+psycopg2-binary

@@ -1,187 +1,120 @@
 import streamlit as st
-import psycopg2
+from supabase import create_client, Client
 import pandas as pd
 
-# ---------- Database Connection ----------
-def get_connection():
+# ---------- Connect to Supabase ----------
+def init_connection():
     try:
-        return psycopg2.connect(
-            host=st.secrets["postgres"]["host"],
-            dbname=st.secrets["postgres"]["database"],
-            user=st.secrets["postgres"]["user"],
-            password=st.secrets["postgres"]["password"],
-            port=int(st.secrets["postgres"]["port"]),
-            sslmode="require"
-        )
-    except psycopg2.OperationalError as e:
-        st.session_state.message = f"❌ Database connection failed: {str(e)}"
-        st.session_state.msg_type = "error"
+        url = st.secrets["supabase"]["url"]
+        key = st.secrets["supabase"]["key"]
+        return create_client(url, key)
+    except Exception as e:
+        st.error(f"❌ Supabase connection failed: {str(e)}")
         st.stop()
+
+supabase: Client = init_connection()
 
 # ---------- Insert Data ----------
 def insert_data(table_name, data):
-    conn = get_connection()
-    if conn is None:
-        return
-    cursor = conn.cursor()
-
-    queries = {
-        "Patients1": "INSERT INTO Patients1 (full_name, email, phone, age, gender, address) VALUES (%s, %s, %s, %s, %s, %s)",
-        "Doctors1": "INSERT INTO Doctors1 (full_name, specialization, email, phone, experience_years) VALUES (%s, %s, %s, %s, %s)",
-        "AvailabilityOfDoctors1": "INSERT INTO AvailabilityOfDoctors1 (doctor_id, available_date, start_time, end_time, is_available) VALUES (%s, %s, %s, %s, %s)",
-        "Appointments1": "INSERT INTO Appointments1 (patient_id, doctor_id, appointment_date, appointment_time, status) VALUES (%s, %s, %s, %s, %s)",
-        "Payments1": "INSERT INTO Payments1 (appointment_id, patient_id, amount, transaction_id, payment_status) VALUES (%s, %s, %s, %s, %s)",
-        "Medical_Records1": "INSERT INTO Medical_Records1 (patient_id, doctor_id, appointment_id, diagnosis, prescription) VALUES (%s, %s, %s, %s, %s)"
-    }
-
     try:
-        cursor.execute(queries[table_name], data)
-        conn.commit()
-        st.session_state.message = "✅ Record inserted successfully!"
-        st.session_state.msg_type = "success"
+        response = supabase.table(table_name).insert(data).execute()
+        if response.data:
+            st.success("✅ Record inserted successfully!")
+        else:
+            st.error("❌ Insert failed.")
     except Exception as e:
-        conn.rollback()
-        st.session_state.message = f"❌ Insert failed: {str(e)}"
-        st.session_state.msg_type = "error"
-    finally:
-        cursor.close()
-        conn.close()
+        st.error(f"❌ Insert failed: {str(e)}")
 
 # ---------- Delete Record ----------
-def delete_record(table_name, record_id):
-    conn = get_connection()
-    if conn is None:
-        return
-    cur = conn.cursor()
-
-    id_column_map = {
-        "Patients1": "patient_id",
-        "Doctors1": "doctor_id",
-        "AvailabilityOfDoctors1": "availability_id",
-        "Appointments1": "appointment_id",
-        "Payments1": "payment_id",
-        "Medical_Records1": "record_id"
-    }
-
-    id_col = id_column_map.get(table_name)
+def delete_record(table_name, record_id, id_column):
     try:
-        cur.execute(f"SELECT * FROM {table_name} WHERE {id_col} = %s", (record_id,))
-        record = cur.fetchone()
-        if record:
-            cur.execute(f"DELETE FROM {table_name} WHERE {id_col} = %s", (record_id,))
-            conn.commit()
-            st.session_state.message = "✅ Record deleted successfully!"
-            st.session_state.msg_type = "success"
+        response = supabase.table(table_name).delete().eq(id_column, record_id).execute()
+        if response.data:
+            st.success("✅ Record deleted successfully!")
         else:
-            st.session_state.message = "❌ ID not found. Please check and try again."
-            st.session_state.msg_type = "error"
+            st.warning("⚠️ ID not found.")
     except Exception as e:
-        conn.rollback()
-        st.session_state.message = f"❌ Deletion failed: {str(e)}"
-        st.session_state.msg_type = "error"
-    finally:
-        cur.close()
-        conn.close()
+        st.error(f"❌ Deletion failed: {str(e)}")
 
-# ---------- Show Persistent Messages ----------
-def show_message_below(msg_placeholder=None):
-    if "message" in st.session_state and st.session_state.message:
-        msg = st.session_state.message
-        msg_type = st.session_state.msg_type
-        if msg_placeholder:
-            if msg_type == "success":
-                msg_placeholder.success(msg)
-            elif msg_type == "error":
-                msg_placeholder.error(msg)
-            elif msg_type == "warning":
-                msg_placeholder.warning(msg)
-        st.session_state.message = None  # clear after showing
-
-
-def show_message():
-    if "message" in st.session_state and st.session_state.message:
-        msg = st.session_state.message
-        msg_type = st.session_state.msg_type
-        if msg_type == "success":
-            st.success(msg)
-        elif msg_type == "error":
-            st.error(msg)
-        elif msg_type == "warning":
-            st.warning(msg)
-        st.session_state.message = None
+# ---------- Show Table ----------
+def show_table(table_name):
+    try:
+        response = supabase.table(table_name).select("*").execute()
+        df = pd.DataFrame(response.data)
+        if not df.empty:
+            st.dataframe(df, use_container_width=True)
+        else:
+            st.info("ℹ️ No records found.")
+    except Exception as e:
+        st.error(f"❌ Failed to load table: {str(e)}")
 
 # ---------- Home Page ----------
 def home_page():
     st.markdown("<h1 style='text-align:center;color:#0078ff;'>🩺 Real-Time Doctor Appointment System</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align:center;color:gray;'>A smart way to manage patients, doctors, and prescriptions efficiently.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center;color:gray;'>Smartly manage doctors, patients, and medical records.</p>", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
 
-    if st.button("🔐 Login / Sign Up", use_container_width=True):
+    if st.button("🔐 Login / Signup", use_container_width=True):
         st.session_state.page = "auth"
         st.rerun()
 
-# ---------- Authentication Page ----------
+# ---------- Auth Page ----------
 def auth_page():
     st.title("🔑 Login / Signup")
-    show_message()
 
     choice = st.radio("Select Action", ["Login", "Signup"])
     email = st.text_input("Email")
     password = st.text_input("Password", type="password")
 
-    conn = get_connection()
-    if conn is None:
-        return
-    cur = conn.cursor()
-
     if choice == "Signup":
         username = st.text_input("Username")
         if st.button("Sign Up"):
-            if email and password and username:
+            if email.strip() and password.strip() and username.strip():
                 try:
-                    cur.execute("INSERT INTO Users1 (username, email, password) VALUES (%s, %s, %s)", (username, email, password))
-                    conn.commit()
-                    st.session_state.message = "✅ Signup successful! Please login."
-                    st.session_state.msg_type = "success"
-                    st.rerun()
+                    response = supabase.table("users1").insert({
+                        "username": username,
+                        "email": email,
+                        "password": password
+                    }).execute()
+                    if response.data:
+                        st.success("✅ Signup successful! Please login.")
+                    else:
+                        st.error("❌ Signup failed.")
                 except Exception as e:
-                    st.session_state.message = f"❌ Signup failed: {str(e)}"
-                    st.session_state.msg_type = "error"
-                    st.rerun()
+                    st.error(f"❌ Signup failed: {str(e)}")
             else:
                 st.warning("⚠️ Please fill in all fields.")
+
     elif choice == "Login":
         if st.button("Login"):
-            cur.execute("SELECT * FROM Users1 WHERE email=%s AND password=%s", (email, password))
-            user = cur.fetchone()
-            if user:
-                st.session_state.page = "dashboard"
-                st.session_state.message = None
-                st.rerun()
+            if email.strip() and password.strip():
+                try:
+                    response = supabase.table("users1").select("*").eq("email", email).eq("password", password).execute()
+                    if response.data:
+                        st.session_state.page = "dashboard"
+                        st.session_state.user = response.data[0]
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid credentials!")
+                except Exception as e:
+                    st.error(f"❌ Login failed: {str(e)}")
             else:
-                st.session_state.message = "❌ Invalid credentials!"
-                st.session_state.msg_type = "error"
-                st.rerun()
+                st.warning("⚠️ Please enter email and password.")
 
-    cur.close()
-    conn.close()
-
-# ---------- Dashboard Page ----------
+# ---------- Dashboard ----------
 def dashboard_page():
     st.markdown("<h2 style='color:#0078ff;'>🏥 Hospital Management Dashboard</h2>", unsafe_allow_html=True)
-    show_message()
 
     tables_with_emojis = {
-        "Patients1": "🧍‍♂️ Patients",
-        "Doctors1": "🩺 Doctors",
-        "AvailabilityOfDoctors1": "📅 Availability",
-        "Appointments1": "⏰ Appointments",
-        "Payments1": "💳 Payments",
-        "Medical_Records1": "📋 Medical Records"
+        "patients1": "🧍‍♂️ Patients",
+        "doctors1": "🩺 Doctors",
+        "availabilityofdoctors1": "📅 Availability",
+        "appointments1": "⏰ Appointments",
+        "payments1": "💳 Payments",
+        "medical_records1": "📋 Medical Records"
     }
 
-    st.subheader("📋 Select a Table to Manage:")
-    selected_label = st.selectbox("Choose Table", list(tables_with_emojis.values()))
+    selected_label = st.selectbox("📋 Choose Table to Manage", list(tables_with_emojis.values()))
     selected_table = [tbl for tbl, lbl in tables_with_emojis.items() if lbl == selected_label][0]
 
     st.markdown("---")
@@ -197,26 +130,14 @@ def dashboard_page():
     st.markdown("---")
     if st.button("🚪 Logout"):
         st.session_state.page = "home"
-        st.session_state.message = None
+        st.session_state.user = None
         st.rerun()
 
-# ---------- View Table ----------
-def show_table(table_name):
-    conn = get_connection()
-    if conn is None:
-        return
-    try:
-        df = pd.read_sql_query(f"SELECT * FROM {table_name}", conn)
-        st.dataframe(df, use_container_width=True)
-    except Exception as e:
-        st.error(f"❌ Failed to load table: {str(e)}")
-    finally:
-        conn.close()
-
-# ---------- Insert Form ----------
+# ---------- Insert Form with Validation ----------
 def insert_form(table_name):
-    st.markdown("### ➕ Insert New Record")
-    if table_name == "Patients1":
+    st.subheader("➕ Insert New Record")
+
+    if table_name == "patients1":
         full_name = st.text_input("Full Name")
         email = st.text_input("Email")
         phone = st.text_input("Phone")
@@ -224,101 +145,119 @@ def insert_form(table_name):
         gender = st.text_input("Gender")
         address = st.text_area("Address")
         if st.button("Insert Patient"):
-            if all([full_name, email, phone, age, gender, address]):
-                insert_data("Patients1", (full_name, email, phone, age, gender, address))
-                st.rerun()
+            if all([full_name.strip(), email.strip(), phone.strip(), age > 0, gender.strip(), address.strip()]):
+                insert_data("patients1", {"full_name": full_name, "email": email, "phone": phone, "age": age, "gender": gender, "address": address})
             else:
-                st.warning("⚠️ Please fill all fields.")
+                st.warning("⚠️ Please fill all fields correctly.")
 
-    elif table_name == "Doctors1":
+    elif table_name == "doctors1":
         full_name = st.text_input("Full Name")
         specialization = st.text_input("Specialization")
         email = st.text_input("Email")
         phone = st.text_input("Phone")
         experience = st.number_input("Experience (years)", 0)
         if st.button("Insert Doctor"):
-            if all([full_name, specialization, email, phone, experience]):
-                insert_data("Doctors1", (full_name, specialization, email, phone, experience))
-                st.rerun()
+            if all([full_name.strip(), specialization.strip(), email.strip(), phone.strip(), experience > 0]):
+                insert_data("doctors1", {"full_name": full_name, "specialization": specialization, "email": email, "phone": phone, "experience_years": experience})
             else:
-                st.warning("⚠️ Please fill all fields.")
+                st.warning("⚠️ Please fill all fields correctly.")
 
-    elif table_name == "AvailabilityOfDoctors1":
+    elif table_name == "availabilityofdoctors1":
         doctor_id = st.number_input("Doctor ID", 0)
         available_date = st.date_input("Available Date")
         start_time = st.time_input("Start Time")
         end_time = st.time_input("End Time")
         is_available = st.checkbox("Available", value=True)
         if st.button("Insert Availability"):
-            if doctor_id and available_date and start_time and end_time:
-                insert_data("AvailabilityOfDoctors1", (doctor_id, available_date, start_time, end_time, is_available))
-                st.rerun()
+            if doctor_id > 0 and available_date and start_time and end_time:
+                insert_data("availabilityofdoctors1", {
+                    "doctor_id": doctor_id,
+                    "available_date": str(available_date),
+                    "start_time": str(start_time),
+                    "end_time": str(end_time),
+                    "is_available": is_available
+                })
             else:
-                st.warning("⚠️ Please fill all fields.")
+                st.warning("⚠️ Please fill all fields correctly.")
 
-    elif table_name == "Appointments1":
+    elif table_name == "appointments1":
         patient_id = st.number_input("Patient ID", 0)
         doctor_id = st.number_input("Doctor ID", 0)
         appointment_date = st.date_input("Appointment Date")
         appointment_time = st.time_input("Appointment Time")
         status = st.text_input("Status", "Scheduled")
         if st.button("Insert Appointment"):
-            if patient_id and doctor_id and appointment_date and appointment_time and status:
-                insert_data("Appointments1", (patient_id, doctor_id, appointment_date, appointment_time, status))
-                st.rerun()
+            if patient_id > 0 and doctor_id > 0 and appointment_date and appointment_time and status.strip():
+                insert_data("appointments1", {
+                    "patient_id": patient_id,
+                    "doctor_id": doctor_id,
+                    "appointment_date": str(appointment_date),
+                    "appointment_time": str(appointment_time),
+                    "status": status
+                })
             else:
-                st.warning("⚠️ Please fill all fields.")
+                st.warning("⚠️ Please fill all fields correctly.")
 
-    elif table_name == "Payments1":
+    elif table_name == "payments1":
         appointment_id = st.number_input("Appointment ID", 0)
         patient_id = st.number_input("Patient ID", 0)
         amount = st.number_input("Amount", 0.0)
         transaction_id = st.text_input("Transaction ID")
         payment_status = st.text_input("Payment Status", "Pending")
         if st.button("Insert Payment"):
-            if all([appointment_id, patient_id, amount, transaction_id, payment_status]):
-                insert_data("Payments1", (appointment_id, patient_id, amount, transaction_id, payment_status))
-                st.rerun()
+            if appointment_id > 0 and patient_id > 0 and amount > 0 and transaction_id.strip() and payment_status.strip():
+                insert_data("payments1", {
+                    "appointment_id": appointment_id,
+                    "patient_id": patient_id,
+                    "amount": amount,
+                    "transaction_id": transaction_id,
+                    "payment_status": payment_status
+                })
             else:
-                st.warning("⚠️ Please fill all fields.")
+                st.warning("⚠️ Please fill all fields correctly.")
 
-    elif table_name == "Medical_Records1":
+    elif table_name == "medical_records1":
         patient_id = st.number_input("Patient ID", 0)
         doctor_id = st.number_input("Doctor ID", 0)
         appointment_id = st.number_input("Appointment ID", 0)
         diagnosis = st.text_area("Diagnosis")
         prescription = st.text_area("Prescription")
         if st.button("Insert Record"):
-            if all([patient_id, doctor_id, appointment_id, diagnosis, prescription]):
-                insert_data("Medical_Records1", (patient_id, doctor_id, appointment_id, diagnosis, prescription))
-                st.rerun()
+            if patient_id > 0 and doctor_id > 0 and appointment_id > 0 and diagnosis.strip() and prescription.strip():
+                insert_data("medical_records1", {
+                    "patient_id": patient_id,
+                    "doctor_id": doctor_id,
+                    "appointment_id": appointment_id,
+                    "diagnosis": diagnosis,
+                    "prescription": prescription
+                })
             else:
-                st.warning("⚠️ Please fill all fields.")
+                st.warning("⚠️ Please fill all fields correctly.")
 
 # ---------- Delete Form ----------
 def delete_form(table_name):
-    st.markdown("### ❌ Delete Record by ID")
-    record_id = st.number_input("Enter Record ID to Delete", 0)
+    st.subheader("❌ Delete Record")
+    record_id = st.number_input("Enter Record ID", 0)
 
-    delete_btn = st.button("Delete Record")
+    id_map = {
+        "patients1": "patient_id",
+        "doctors1": "doctor_id",
+        "availabilityofdoctors1": "availability_id",
+        "appointments1": "appointment_id",
+        "payments1": "payment_id",
+        "medical_records1": "record_id"
+    }
 
-    # Message placeholder BELOW button
-    msg_placeholder = st.empty()
-
-    if delete_btn:
+    if st.button("Delete"):
         if record_id > 0:
-            delete_record(table_name, record_id)
-            show_message_below(msg_placeholder)
+            delete_record(table_name, record_id, id_map.get(table_name))
         else:
-            msg_placeholder.warning("⚠️ Please enter a valid ID.")
+            st.warning("⚠️ Please enter a valid ID.")
 
-# ---------- Main Controller ----------
+# ---------- Main ----------
 def main():
     if "page" not in st.session_state:
         st.session_state.page = "home"
-    if "message" not in st.session_state:
-        st.session_state.message = None
-        st.session_state.msg_type = None
 
     if st.session_state.page == "home":
         home_page()
